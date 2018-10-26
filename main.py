@@ -256,13 +256,57 @@ print(co)
 
 pred_dict = {idx: RLenc(np.round(preds_test[idx] > threshold_best)) for i, idx in enumerate(tqdm(test_df11.index.values))}#.id))}
 
-
 sub = pd.DataFrame.from_dict(pred_dict,orient='index')
 sub.index.names = ['id']
 sub.columns = ['rle_mask']
 sub.to_csv('submissionpth.csv')
 
+#######################################################################################################################################
+
+def main(config, aug_list):
+    # cudnn.benchmark = True
+    if config.mode == 'train':
+        solver = SingleModelSolver(config)
+        solver.train_fold(config.train_fold_index, aug_list)
+    if config.mode == 'test':
+        solver = SingleModelSolver(config)
+        solver.infer_fold_all_Cycle(config.train_fold_index)
 
 
-    
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--train_fold_index', type=int, default=0)
+    parser.add_argument('--model', type=str, default='model_34')
+    parser.add_argument('--model_name', type=str, default='model_34')
+    parser.add_argument('--image_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=16)
+
+    aug_list = ['flip_lr']
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'])
+    parser.add_argument('--pretrained_model', type=str, default=None)
+
+    parser.add_argument('--lr', type=float, default=0.01)
+    parser.add_argument('--cycle_num', type=int, default=7)
+    parser.add_argument('--cycle_inter', type=int, default=50)
+
+    parser.add_argument('--dice_bce_pretrain_epochs', type=int, default=10)
+    parser.add_argument('--dice_weight', type=float, default=0.5)
+    parser.add_argument('--bce_weight', type=float, default=0.9)
+    parser.add_argument('--num_workers', type=int, default=16)
+
+    # Test settings
+    parser.add_argument('--log_path', type=str, default='logs')
+    parser.add_argument('--model_save_path', type=str, default='models')
+    parser.add_argument('--sample_path', type=str, default='samples')
+    parser.add_argument('--result_path', type=str, default='results')
+
+    # Step size
+    parser.add_argument('--log_step', type=int, default=10)
+    parser.add_argument('--sample_step', type=int, default=10)
+    parser.add_argument('--model_save_step', type=int, default=20000)
+
+    config = parser.parse_args()
+    print(config)
+    main(config, aug_list)
 
