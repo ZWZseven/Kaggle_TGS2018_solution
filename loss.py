@@ -1,25 +1,23 @@
-   """
-    def set_loss(self):
-        if self.activation_func == 'softmax':
-            loss_function = partial(mixed_dice_cross_entropy_loss,
-                                    dice_loss=multiclass_dice_loss,
-                                    cross_entropy_loss=nn.CrossEntropyLoss(),
-                                    dice_activation='softmax',
-                                    dice_weight=self.architecture_config['model_params']['dice_weight'],
-                                    cross_entropy_weight=self.architecture_config['model_params']['bce_weight']
-                                    )
-        elif self.activation_func == 'sigmoid':
-            loss_function = partial(mixed_dice_bce_loss,
-                                    dice_loss=multiclass_dice_loss,
-                                    bce_loss=nn.BCEWithLogitsLoss(),
-                                    dice_activation='sigmoid',
-                                    dice_weight=self.architecture_config['model_params']['dice_weight'],
-                                    bce_weight=self.architecture_config['model_params']['bce_weight']
-                                    )
-        else:
-            raise Exception('Only softmax and sigmoid activations are allowed')
-        self.loss_function = [('mask', loss_function, 1.0)]
-"""
+import os
+import numpy as np # linear algebra
+import pandas as pd # data processing, 
+
+from skimage.segmentation import mark_boundaries
+
+import cv2
+import random
+from datetime import datetime
+import gc
+
+import torch
+from torch import nn
+
+from torch.autograd import Variable
+from torch.nn import functional as F
+
+from skimage.morphology import label
+from skimage.transform import resize
+
 class DiceLoss(nn.Module):
     def __init__(self, smooth=0, eps=1e-7):
         super(DiceLoss, self).__init__()
