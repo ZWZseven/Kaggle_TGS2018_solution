@@ -1,4 +1,3 @@
-BATCH_SIZE = 32#64#16#64#128#400#512#64#256#128#64#16
 import os
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
@@ -30,9 +29,6 @@ from pathlib import Path
 from skimage.morphology import label
 from skimage.transform import resize
 
-ship_dir = '../input/tgs-salt-identification-challenge/'#'./drive/My Drive/salt/'#'../input/tgs-salt-identification-challenge/'#../input/airbus-ship-detection/'#../input/tgs-salt-identification-challenge/'#
-train_image_dir = os.path.join(ship_dir, 'train')
-test_image_dir = os.path.join(ship_dir, 'test')
 # ref: https://www.kaggle.com/paulorzp/run-length-encode-and-decode
 def rle_encode(img):
     '''
