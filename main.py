@@ -2,7 +2,108 @@ import argparse
 import time
 import datetime
 
+from data_preparation.dataloader import *
+from data_preparation.data_augmentation import *
+from model.unet34_deepsupervision import *
+from model.model import *
+from eval import *
+from loss import *
+from prediction import *
+from train import *
+from utils import *
+
 from tqdm import tqdm_notebook
+
+class SingleModelSolver(object):
+    def __init__(self, config):
+
+        self.model_name = config.model_name
+        self.model = config.model
+
+        self.dice_weight = config.dice_weight
+        self.bce_weight = config.bce_weight
+
+        # Model hyper-parameters
+        self.image_size = config.image_size
+
+        # Hyper-parameteres
+        self.g_lr = config.lr
+        self.cycle_num = config.cycle_num
+        self.cycle_inter = config.cycle_inter
+        self.dice_bce_pretrain_epochs = config.dice_bce_pretrain_epochs
+
+        self.batch_size = config.batch_size
+        self.pretrained_model = config.pretrained_model
+
+        # Path
+        self.log_path = os.path.join('./models', self.model_name, config.log_path)
+        self.sample_path = os.path.join('./models', self.model_name, config.sample_path)
+        self.model_save_path = os.path.join('./models', self.model_name, config.model_save_path)
+        self.result_path = os.path.join('./models', self.model_name, config.result_path)
+        # Create directories if not exist
+        if not os.path.exists(self.log_path):
+            os.makedirs(self.log_path)
+        if not os.path.exists(self.model_save_path):
+            os.makedirs(self.model_save_path)
+        if not os.path.exists(self.sample_path):
+            os.makedirs(self.sample_path)
+        if not os.path.exists(self.result_path):
+            os.makedirs(self.result_path)
+
+        # Step size
+        self.log_step = config.log_step
+        self.sample_step = config.sample_step
+        self.model_save_step = config.model_save_step
+
+        # Build tensorboard if use
+        self.build_model()
+        self.load_pretrained_model(config.train_fold_index)
+
+    def build_model(self):
+
+        if self.model == 'model_34':
+            self.G = model34_DeepSupervion()
+
+        elif self.model == 'model_50A':
+            self.G = model50A_DeepSupervion()
+
+        elif self.model == 'model_101A':
+            self.G = model101A_DeepSupervion()
+
+        self.g_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.G.parameters()),
+                                           self.g_lr, weight_decay=0.0002, momentum=0.9)
+        self.print_network(self.G, 'G')
+        if torch.cuda.is_available():
+            self.G = torch.nn.DataParallel(self.G)
+            self.G.cuda()
+
+    def print_network(self, model, name):
+        num_params = 0
+        for p in model.parameters():
+            num_params += p.numel()
+        print(name)
+        print(model)
+        print("The number of parameters: {}".format(num_params))
+
+    def load_pretrained_model(self, fold_index, mode = None, Cycle=None):
+            if mode == None:
+                if os.path.exists(os.path.join(self.model_save_path, 'fold_' + str(fold_index),
+                                               '{}_G.pth'.format(self.pretrained_model))):
+                    self.G.load_state_dict(torch.load(os.path.join(self.model_save_path,'fold_' + str(fold_index),
+                                                                   '{}_G.pth'.format(self.pretrained_model))))
+                    print('loaded trained G models fold: {} (step: {})..!'.format(fold_index, self.pretrained_model))
+
+
+
+
+
+
+
+
+
+
+
+##################################################################################################################################
 
 
 train_df11 = pd.read_csv("../input/tgs-salt-identification-challenge/train.csv", index_col="id", usecols=[0])
