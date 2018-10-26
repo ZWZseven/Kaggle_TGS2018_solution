@@ -13,368 +13,295 @@ from train import *
 from utils import *
 
 from tqdm import tqdm_notebook
-
-class SingleModelSolver(object):
-    def __init__(self, config):
-
-        self.model_name = config.model_name
-        self.model = config.model
-
-        self.dice_weight = config.dice_weight
-        self.bce_weight = config.bce_weight
-
-        # Model hyper-parameters
-        self.image_size = config.image_size
-
-        # Hyper-parameteres
-        self.g_lr = config.lr
-        self.cycle_num = config.cycle_num
-        self.cycle_inter = config.cycle_inter
-        self.dice_bce_pretrain_epochs = config.dice_bce_pretrain_epochs
-
-        self.batch_size = config.batch_size
-        self.pretrained_model = config.pretrained_model
-
-        # Path
-        self.log_path = os.path.join('./models', self.model_name, config.log_path)
-        self.sample_path = os.path.join('./models', self.model_name, config.sample_path)
-        self.model_save_path = os.path.join('./models', self.model_name, config.model_save_path)
-        self.result_path = os.path.join('./models', self.model_name, config.result_path)
-        # Create directories if not exist
-        if not os.path.exists(self.log_path):
-            os.makedirs(self.log_path)
-        if not os.path.exists(self.model_save_path):
-            os.makedirs(self.model_save_path)
-        if not os.path.exists(self.sample_path):
-            os.makedirs(self.sample_path)
-        if not os.path.exists(self.result_path):
-            os.makedirs(self.result_path)
-
-        # Step size
-        self.log_step = config.log_step
-        self.sample_step = config.sample_step
-        self.model_save_step = config.model_save_step
-
-        # Build tensorboard if use
-        self.build_model()
-        self.load_pretrained_model(config.train_fold_index)
-
-    def build_model(self):
-
-        if self.model == 'model_34':
-            self.G = model34_DeepSupervion()
-
-        elif self.model == 'model_50A':
-            self.G = model50A_DeepSupervion()
-
-        elif self.model == 'model_101A':
-            self.G = model101A_DeepSupervion()
-
-        self.g_optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.G.parameters()),
-                                           self.g_lr, weight_decay=0.0002, momentum=0.9)
-        self.print_network(self.G, 'G')
-        if torch.cuda.is_available():
-            self.G = torch.nn.DataParallel(self.G)
-            self.G.cuda()
-
-    def print_network(self, model, name):
-        num_params = 0
-        for p in model.parameters():
-            num_params += p.numel()
-        print(name)
-        print(model)
-        print("The number of parameters: {}".format(num_params))
-
-    def load_pretrained_model(self, fold_index, mode = None, Cycle=None):
-            if mode == None:
-                if os.path.exists(os.path.join(self.model_save_path, 'fold_' + str(fold_index),
-                                               '{}_G.pth'.format(self.pretrained_model))):
-                    self.G.load_state_dict(torch.load(os.path.join(self.model_save_path,'fold_' + str(fold_index),
-                                                                   '{}_G.pth'.format(self.pretrained_model))))
-                    print('loaded trained G models fold: {} (step: {})..!'.format(fold_index, self.pretrained_model))
-
-
-
-
-
-
-
-
-
-
-
-##################################################################################################################################
-
-
-train_df11 = pd.read_csv("../input/tgs-salt-identification-challenge/train.csv", index_col="id", usecols=[0])
-depths_df11 = pd.read_csv("../input/tgs-salt-identification-challenge/depths.csv", index_col="id")
-#train_df
-train_df11 = train_df11.join(depths_df11)
-test_df11 = depths_df11[~depths_df11.index.isin(train_df11.index)]
-
-df_pred = pd.read_csv('../input/tgs-salt-identification-challenge/train.csv', index_col=[0])
-df_pred.fillna('', inplace=True)
-df_pred['suspicious'] = False
-
-i=0
-for index, row in df_pred.iterrows():
-    encoded_mask = row['rle_mask'].split(' ')
-    i=i+1
-    mask0 = rle_decode(row['rle_mask'])
-
-    if (len(encoded_mask) > 1 and len(encoded_mask) < 5 and int(encoded_mask[1]) % 101 == 0 and int(encoded_mask[1]) <= 100*101):
-        df_pred.loc[index,'suspicious'] = True
-        
-img_size_ori = 101
-img_size_target = 128#127
-
-train_df0 = pd.read_csv("../input/tgs-salt-identification-challenge/train.csv", index_col="id", usecols=[0])
-depths_df0 = pd.read_csv("../input/tgs-salt-identification-challenge/depths.csv", index_col="id")
-#train_df
-train_df0 = train_df0.join(depths_df0)
-test_df0 = depths_df0[~depths_df0.index.isin(train_df0.index)]
-train_df0["images"] = [np.array(cv2.imread("../input/tgs-salt-identification-challenge/train/images/{}.png".format(idx), 0)) / 255 for idx in (train_df0.index)]
-#print(train_df.shape) if ~df_pred.loc[idx,'suspicious']
-train_df0['suspicious'] = df_pred['suspicious']
-train_df0['rle_mask'] = df_pred['rle_mask']
-train_df0["masks"] = [np.array(cv2.imread("../input/tgs-salt-identification-challenge/train/masks/{}.png".format(idx), 0)) / 255 for idx in (train_df0.index)]
-
-train_df0["coverage"] = train_df0.masks.map(np.sum) / pow(img_size_ori, 2)
+from skimage.morphology import binary_opening, disk
 
 def cov_to_class(val):    
     for i in range(0, 11):
         if val * 10 <= i :
             return i
         
-train_df0["coverage_class"] = train_df0.coverage.map(cov_to_class)
-##############################################################################
-train_df1=train_df0.copy()
-sus_df = train_df0[train_df0.suspicious]  
+class ModelSolver(object):
+    def __init__(self, config):
+        self.traincsv_path = config.traincsv_path
+        self.depthscsv_path = config.depthscsv_path
+        self.train_image_path = config.train_image_path
+        self.train_mask_path = config.train_mask_path
+        self.test_image_dir = config.test_image_dir
+        
+        self.model_path = config.pretrained_model
+        
+        # Model hyper-parameters
+        self.image_size = config.image_size
 
-################################################################
+        # Hyper-parameteres
+        self.g_lr = config.lr
+        #self.cycle_num = config.cycle_num
+        #self.cycle_inter = config.cycle_inter
+        self.epochs = config.epochs
 
-imtrain=np.array(train_df0.images.tolist())########################################
-immask=np.array(train_df0.masks.tolist())
-#np.array(train_df.masks.map(imgexpand).tolist()).reshape(-1, img_size_target, img_size_target, 1)
-
-ids_train, ids_valid, x_train, x_valid, y_train, y_valid, cov_train, cov_test, depth_train, depth_test = train_test_split(
-    train_df0.index.values,
-    imtrain, 
-    immask, 
-    train_df0.coverage.values,
-    train_df0.z.values,
-    test_size=0.08, stratify=train_df0.coverage_class, random_state=1337)
-
-
-#########################################################
-train_df0.reset_index(inplace=True)
-
-ids_train=pd.DataFrame(ids_train)
-#ids_train.rename(columns={'0':'id'},inplace=True)
-ids_train.columns = ['id']#
-
-ids_valid=pd.DataFrame(ids_valid)
-#ids_train.rename(columns={'0':'id'},inplace=True)
-ids_valid.columns = ['id']#
-
-train_df=train_df0[train_df0.id.isin(ids_train.id)]
-#df.drop(['B','C'],axis=1,inplace=True)
-valid_df=train_df0[train_df0.id.isin(ids_valid.id)]
-
-train_df1.reset_index(inplace=True)
-valid_df_sus=train_df1[~train_df1.id.isin(ids_train.id)]
-##################################################################
-grp = list(train_df.groupby('id'))
-
-zmin=min([list(m['z'].values) for _,m in grp])
-zmax=max([list(m['z'].values) for _,m in grp])
-zdif=(zmax[0]-zmin[0])
-print(zdif)
-print(zmin)
-
-#################################################################
-
-train_loader = make_loader(train_df, batch_size =  BATCH_SIZE, shuffle=True, transform=train_transform)
-valid_loader = make_loader(valid_df, batch_size = BATCH_SIZE // 2, transform=None)
-
-########################################################
-train_transform = DualCompose([
-        HorizontalFlip(),
-        ZoominRandomCropNew([101,101],1.10),
-        Rotate(limit=10),
-        RandomBrightness(limit=0.08),
-])
-
-val_transform = DualCompose([
-        #Imgexpand(),##############################################CenterCrop((512,512,3)),
-      ])
+        self.batch_size = config.batch_size
 
 
-######################################################
-model = LinkNet34deeps(1) #
+    def data_prep(self, traincsv_path, depthscsv_path, train_image_path, train_mask_path):
+        train_df11 = pd.read_csv(traincsv_path, index_col="id", usecols=[0])
+        depths_df11 = pd.read_csv(depthscsv_path, index_col="id")
+        #train_df
+        train_df11 = train_df11.join(depths_df11)
+        test_df11 = depths_df11[~depths_df11.index.isin(train_df11.index)]
+
+        df_pred = pd.read_csv(traincsv_path, index_col=[0])
+        df_pred.fillna('', inplace=True)
+        df_pred['suspicious'] = False
+
+        i=0
+        for index, row in df_pred.iterrows():
+            encoded_mask = row['rle_mask'].split(' ')
+            i=i+1
+            mask0 = rle_decode(row['rle_mask'])
+            if (len(encoded_mask) > 1 and len(encoded_mask) < 5 and int(encoded_mask[1]) % 101 == 0 and int(encoded_mask[1]) <= 100*101):
+                df_pred.loc[index,'suspicious'] = True
+
+        img_size_ori = 101
+        img_size_target = 128#127
+
+        train_df0 = pd.read_csv(traincsv_path, index_col="id", usecols=[0])
+        depths_df0 = pd.read_csv(depthscsv_path, index_col="id")
+        #train_df
+        train_df0 = train_df0.join(depths_df0)
+        test_df0 = depths_df0[~depths_df0.index.isin(train_df0.index)]
+        train_df0["images"] = [np.array(cv2.imread(train_image_path+"/{}.png".format(idx), 0)) / 255 for idx in (train_df0.index)]
+        #print(train_df.shape) if ~df_pred.loc[idx,'suspicious']
+        train_df0['suspicious'] = df_pred['suspicious']
+        train_df0['rle_mask'] = df_pred['rle_mask']
+        train_df0["masks"] = [np.array(cv2.imread(train_mask_path+"/{}.png".format(idx), 0)) / 255 for idx in (train_df0.index)]
+
+        train_df0["coverage"] = train_df0.masks.map(np.sum) / pow(img_size_ori, 2)
+
+        train_df0["coverage_class"] = train_df0.coverage.map(cov_to_class)
+        ##############################################################################
+        train_df1=train_df0.copy()
+        sus_df = train_df0[train_df0.suspicious]  
+
+        ##################################################################
+        n_fold = 5
+        depths = pd.read_csv(depthscsv_path)
+        depths.sort_values('z', inplace=True)
+        #depths.drop('z', axis=1, inplace=True)
+        depths['fold'] = (list(range(n_fold))*depths.shape[0])[:depths.shape[0]]
+
+        print(depths.head())
+
+        train_df = depths[depths.fold!=0]
+        train_df = train_df[train_df.id.isin(train_df0.index)]
+        train_df= train_df.join(df_pred,on='id')
+
+        valid_df = depths[depths.fold==0]
+        valid_df = valid_df[valid_df.id.isin(train_df0.index)]
+        valid_df= valid_df.join(df_pred,on='id')
+
+        train_df0.reset_index(inplace=True)
+
+        grp = list(train_df.groupby('id'))
+
+        zmin=min([list(m['z'].values) for _,m in grp])
+        zmax=max([list(m['z'].values) for _,m in grp])
+        zdif=(zmax[0]-zmin[0])
+        print(zdif)
+        print(zmin)
+        return train_df, valid_df, train_df1, train_df11, test_df0, test_df11, grp, zmin, zmax
+
+    def load_weights(self, model, model_path):
+        state = torch.load(str(model_path))
+        state = {key.replace('module.', ''): value for key, value in state['model'].items()}
+        model.load_state_dict(state)
+
+        return model
+
+    def model_train(self, train_df, valid_df, BATCH_SIZE=32, lr=1e-2, n_epochs=60, model_path=None):
+
+        train_loader = make_loader(train_df, batch_size =  BATCH_SIZE, shuffle=True, transform=train_transform)
+        valid_loader = make_loader(valid_df, batch_size = BATCH_SIZE // 2, transform=None)
+
+        ########################################################
+        train_transform = DualCompose([
+                HorizontalFlip(),
+                ZoominRandomCropNew([101,101],1.10),
+                Rotate(limit=10),
+                RandomBrightness(limit=0.08),
+        ])
+
+        val_transform = DualCompose([
+                #Imgexpand(),##############################################CenterCrop((512,512,3)),
+              ])
 
 
-###################################################
-model_path ='../input/linknet34deepsv3fulldare60002d01scalere4/model_1.pt'#'../input/model0924/model_0924denseHlight.pt'
-state = torch.load(str(model_path))
-state = {key.replace('module.', ''): value for key, value in state['model'].items()}
-model.load_state_dict(state)
-if torch.cuda.is_available():
-    model.cuda()
+        ######################################################
+        model = LinkNet34deeps(1) #
 
-
-retrain5(init_optimizer=lambda lr: torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-2, momentum=0.9, weight_decay=0.0001),#(model.parameters(), lr=lr),
-        lr = 1e-2,#1e-4
-        n_epochs = 60,#35,#40,
-        model=model,
-        criterion=criterionL5,#LossBinaryElu(jaccard_weight=0),
-        train_loader=train_loader,
-        valid_loader=valid_loader,
-        validation=validation5,
-     )
-
-####log visualization####################################
-log_file = 'train_1.log'
-logs = pd.read_json(log_file, lines=True)
-
-plt.figure(figsize=(26,6))
-plt.subplot(1, 2, 1)
-plt.plot(logs.step[logs.loss.notnull()],
-            logs.loss[logs.loss.notnull()],
-            label="on training set")
- 
-#plt.plot(logs.step[logs.valid_loss.notnull()],
-#            logs.valid_loss[logs.valid_loss.notnull()],
-#            label = "on validation set")
-         
-plt.xlabel('step')
-plt.legend(loc='center left')
-plt.tight_layout()
-plt.show();
-
-###################################################################################
-
-######################################################################
-
-model = LinkNet34deeps(1)#UnetPP(1)#DenseNet34() #LinkNet34a(1)#Unet_grid_attention()#DenseNet34H(1)#Incv3( num_classes=1, num_channels=3)
-#model = UNet34H(1)#DenseNet34H(1)##LinkNet34(1)#AlbuNet()#UNetResNet(34,1,dropout_2d=0.0)#UNet()
-model_path ='model_1.pt'
-state = torch.load(str(model_path))
-state = {key.replace('module.', ''): value for key, value in state['model'].items()}
-model.load_state_dict(state)
-if torch.cuda.is_available():
-    model.cuda()
-
-model.eval()
-
-train_df1=train_df1.set_index('id')
-
-
-from skimage.morphology import binary_opening, disk
-
-loader = DataLoader(
-        dataset=SaltDataset(valid_df, transform=None, mode='valid'),###########################################################
-        shuffle=False,
-        batch_size=16,#BATCH_SIZE,
-        num_workers=0,
-        pin_memory=torch.cuda.is_available()
-    ) 
-
-y_valid_ori = []
-#preds_valid = [] #
-out_pred_rows = []#pd.DataFrame(columns=('id', 'mask'))#[]
-for batch_num, (inputs, paths) in enumerate(tqdm(loader, desc='valid')):
-    inputs = variable(inputs, volatile=True)
-    outputs = dummy_prediction2(inputs,model)
-
-    for i, image_name in enumerate(paths):
-        mask = outputs[i,0]#F.sigmoid(outputs[i,0]).data.cpu().numpy()
-        out_pred_rows.extend([restore(mask).tolist()])# += [{'id': image_name, 'mask': mask}]
-        y_valid_ori.extend([train_df1.loc[image_name].masks])
-
-
-y_valid_ori = np.array(y_valid_ori)
-preds_valid = np.array(out_pred_rows)
-
-#######################################################
-thresholds = np.linspace(0, 1, 50)
-ious = np.array([get_iou_vector(y_valid_ori, np.int32(preds_valid > threshold)) for threshold in tqdm_notebook(thresholds)])
-
-threshold_best_index = np.argmax(ious[9:-10]) + 9
-iou_best = ious[threshold_best_index]
-threshold_best = thresholds[threshold_best_index]
-
-plt.plot(thresholds, ious)
-plt.plot(threshold_best, iou_best, "xr", label="Best threshold")
-plt.xlabel("Threshold")
-plt.ylabel("IoU")
-plt.title("Threshold vs IoU ({}, {})".format(threshold_best, iou_best))
-plt.legend()
-
-##test dataset########################################################
-test_paths = os.listdir(test_image_dir+'/images/')
-print(len(test_paths), 'test images found')
-
-test_df0['rle_mask'] = None
-
-train_df=0
-train_df0=0
-train_df1=0
-grp=0
-
-if not('id' in test_df0.columns.values.tolist()):
-    test_df0.reset_index(inplace=True)
-
-from skimage.morphology import binary_opening, disk
-#
-loader = DataLoader(
-        dataset=SaltDataset(test_df0, transform=None, mode='predict'),
-        shuffle=False,
-        batch_size=16,#BATCH_SIZE,
-        num_workers=0,
-        pin_memory=torch.cuda.is_available()
-    ) 
-preds_test = {}#[] 
-#ind = []
-out_pred_rows = []
-for batch_num, (inputs, paths) in enumerate(tqdm(loader, desc='Predict')):
-    inputs = variable(inputs, volatile=True)
-    outputs = dummy_prediction2(inputs,model)
-    #outputs = model(inputs)
-    for i, image_name in enumerate(paths):
-
-        mask = outputs[i,0]#
-        if image_name[-4:]=='.png':
-            preds_test[image_name[:-4]]=(restore(mask))
+        if not model_path:
+            if torch.cuda.is_available():
+                model.cuda()        
+            train5(init_optimizer=lambda lr: torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=0.0001),#(model.parameters(), lr=lr),
+                    lr = lr,#1e-4
+                    n_epochs = n_epochs,#35,#40,
+                    model=model,
+                    criterion=criterionL5,#LossBinaryElu(jaccard_weight=0),
+                    train_loader=train_loader,
+                    valid_loader=valid_loader,
+                    validation=validation5,
+                 )
         else:
-            preds_test[image_name]=(restore(mask))
+            model = load_weights(model, model_path)
+            if torch.cuda.is_available():
+                model.cuda()
+            retrain5(init_optimizer=lambda lr: torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=0.0001),#(model.parameters(), lr=lr),
+            lr = lr,#1e-4
+            n_epochs = n_epochs,#35,#40,
+            model=model,
+            criterion=criterionL5,#LossBinaryElu(jaccard_weight=0),
+            train_loader=train_loader,
+            valid_loader=valid_loader,
+            validation=validation5,
+             )
 
-co=0
-for i,idx in enumerate(test_df11.index.values):
-    num=np.sum(np.sum(np.round(preds_test[idx] > threshold_best)))
-    #print(num)
-    if num<20 and num>0:
-        co=co+1
-        preds_test[idx] =np.zeros((101,101))
-print(co)
+        ####log visualization####################################
+        log_file = 'train_1.log'
+        logs = pd.read_json(log_file, lines=True)
+
+        plt.figure(figsize=(26,6))
+        plt.subplot(1, 2, 1)
+        plt.plot(logs.step[logs.loss.notnull()],
+                    logs.loss[logs.loss.notnull()],
+                    label="on training set")
+
+        plt.xlabel('step')
+        plt.legend(loc='center left')
+        plt.tight_layout()
+        plt.show();
+
+    def determine_thrsh(self, valid_df, train_df1, model_path ='model_1.pt', batchsize=16):
+        model = LinkNet34deeps(1)
+
+        if ('id' in train_df1.columns.values.tolist()):
+            train_df1=train_df1.set_index('id')
+
+        state = torch.load(str(model_path))
+        state = {key.replace('module.', ''): value for key, value in state['model'].items()}
+        model.load_state_dict(state)
+        if torch.cuda.is_available():
+            model.cuda()
+
+        model.eval()
+
+        loader = DataLoader(
+                dataset=SaltDataset(valid_df, transform=None, mode='valid'),
+                shuffle=False,
+                batch_size=batchsize,#BATCH_SIZE,
+                num_workers=0,
+                pin_memory=torch.cuda.is_available()
+            ) 
+
+        y_valid_ori = []
+        #preds_valid = [] #
+        out_pred_rows = []#pd.DataFrame(columns=('id', 'mask'))#[]
+        for batch_num, (inputs, paths) in enumerate(tqdm(loader, desc='valid')):
+            inputs = variable(inputs, volatile=True)
+            outputs = dummy_prediction2(inputs,model)
+
+            for i, image_name in enumerate(paths):
+                mask = outputs[i,0]#F.sigmoid(outputs[i,0]).data.cpu().numpy()
+                out_pred_rows.extend([restore(mask).tolist()])# += [{'id': image_name, 'mask': mask}]
+                y_valid_ori.extend([train_df1.loc[image_name].masks])
 
 
-pred_dict = {idx: RLenc(np.round(preds_test[idx] > threshold_best)) for i, idx in enumerate(tqdm(test_df11.index.values))}#.id))}
+        y_valid_ori = np.array(y_valid_ori)
+        preds_valid = np.array(out_pred_rows)
 
-sub = pd.DataFrame.from_dict(pred_dict,orient='index')
-sub.index.names = ['id']
-sub.columns = ['rle_mask']
-sub.to_csv('submissionpth.csv')
+        #######################################################
+        thresholds = np.linspace(0, 1, 50)
+        ious = np.array([get_iou_vector(y_valid_ori, np.int32(preds_valid > threshold)) for threshold in tqdm_notebook(thresholds)])
 
+        threshold_best_index = np.argmax(ious[9:-10]) + 9
+        iou_best = ious[threshold_best_index]
+        threshold_best = thresholds[threshold_best_index]
+
+        plt.plot(thresholds, ious)
+        plt.plot(threshold_best, iou_best, "xr", label="Best threshold")
+        plt.xlabel("Threshold")
+        plt.ylabel("IoU")
+        plt.title("Threshold vs IoU ({}, {})".format(threshold_best, iou_best))
+        plt.legend()
+        return threshold_best
+
+
+    ##test dataset########################################################
+    def model_predict(self, test_image_dir, test_df0, test_df11, threshold_best)
+        test_paths = os.listdir(test_image_dir+'/images/')
+        print(len(test_paths), 'test images found')
+
+        test_df0['rle_mask'] = None
+
+        train_df=0
+        train_df0=0
+        train_df1=0
+        grp=0
+
+        if not('id' in test_df0.columns.values.tolist()):
+            test_df0.reset_index(inplace=True)
+
+        #from skimage.morphology import binary_opening, disk
+        #
+        loader = DataLoader(
+                dataset=SaltDataset(test_df0, transform=None, mode='predict'),
+                shuffle=False,
+                batch_size=16,#BATCH_SIZE,
+                num_workers=0,
+                pin_memory=torch.cuda.is_available()
+            ) 
+        preds_test = {}#[] 
+        #ind = []
+        out_pred_rows = []
+        for batch_num, (inputs, paths) in enumerate(tqdm(loader, desc='Predict')):
+            inputs = variable(inputs, volatile=True)
+            outputs = dummy_prediction2(inputs,model)
+            #outputs = model(inputs)
+            for i, image_name in enumerate(paths):
+
+                mask = outputs[i,0]#
+                if image_name[-4:]=='.png':
+                    preds_test[image_name[:-4]]=(restore(mask))
+                else:
+                    preds_test[image_name]=(restore(mask))
+
+        co=0
+        for i,idx in enumerate(test_df11.index.values):
+            num=np.sum(np.sum(np.round(preds_test[idx] > threshold_best)))
+            #print(num)
+            if num<20 and num>0:
+                co=co+1
+                preds_test[idx] =np.zeros((101,101))
+        print(co)
+
+        pred_dict = {idx: RLenc(np.round(preds_test[idx] > threshold_best)) for i, idx in enumerate(tqdm(test_df11.index.values))}#.id))}
+
+        sub = self.generate_submission(pred_dict) 
+
+        return preds_dict, sub
+
+    def generate_submission(self, pred_dict)              
+        sub = pd.DataFrame.from_dict(pred_dict,orient='index')
+        sub.index.names = ['id']
+        sub.columns = ['rle_mask']
+        sub.to_csv('submissionpth.csv')
+        return sub
 #######################################################################################################################################
 
 def main(config, aug_list):
-    # cudnn.benchmark = True
     if config.mode == 'train':
-        solver = SingleModelSolver(config)
+        solver = ModelSolver(config)
         solver.train_fold(config.train_fold_index, aug_list)
     if config.mode == 'test':
-        solver = SingleModelSolver(config)
+        solver = ModelSolver(config)
         solver.infer_fold_all_Cycle(config.train_fold_index)
 
 
@@ -382,36 +309,24 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--train_fold_index', type=int, default=0)
-    parser.add_argument('--model', type=str, default='model_34')
-    parser.add_argument('--model_name', type=str, default='model_34')
     parser.add_argument('--image_size', type=int, default=128)
     parser.add_argument('--batch_size', type=int, default=16)
 
     aug_list = ['flip_lr']
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'])
-    parser.add_argument('--pretrained_model', type=str, default=None)
+    parser.add_argument('--pretrained_model', type=str, default='model_1.pt')
 
     parser.add_argument('--lr', type=float, default=0.01)
-    parser.add_argument('--cycle_num', type=int, default=7)
-    parser.add_argument('--cycle_inter', type=int, default=50)
 
-    parser.add_argument('--dice_bce_pretrain_epochs', type=int, default=10)
-    parser.add_argument('--dice_weight', type=float, default=0.5)
-    parser.add_argument('--bce_weight', type=float, default=0.9)
-    parser.add_argument('--num_workers', type=int, default=16)
+    parser.add_argument('--epochs', type=int, default=10)
 
     # Test settings
-    parser.add_argument('--log_path', type=str, default='logs')
-    parser.add_argument('--model_save_path', type=str, default='models')
-    parser.add_argument('--sample_path', type=str, default='samples')
-    parser.add_argument('--result_path', type=str, default='results')
-
-    # Step size
-    parser.add_argument('--log_step', type=int, default=10)
-    parser.add_argument('--sample_step', type=int, default=10)
-    parser.add_argument('--model_save_step', type=int, default=20000)
+    parser.add_argument('--traincsv_path', type=str, default='train.csv')
+    parser.add_argument('--depthscsv_path', type=str, default='depths.csv')
+    parser.add_argument('--train_image_path', type=str, default='train/images')
+    parser.add_argument('--train_mask_path', type=str, default='train/masks')
+    parser.add_argument('--test_image_dir', type=str, default='test')
 
     config = parser.parse_args()
     print(config)
     main(config, aug_list)
-
