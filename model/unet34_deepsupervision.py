@@ -1,3 +1,5 @@
+from model import *
+
 class Double_unit(nn.Module):
     def __init__(self, in_channels, middle_channels, out_channels, kernel_size=3, padding=1):#in_channels, middle_channels, out_channels, upscale=Upscale.upsample_bilinear):
         super().__init__()
