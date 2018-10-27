@@ -1,4 +1,4 @@
-Solution for segmenting salt deposits from seismic images with PyTorch.
+## Segmenting salt deposits from seismic images with PyTorch
 
 ## General
 I have participated in the Kaggle competition [TGS Salt Identification Challenge](https://www.kaggle.com/c/tgs-salt-identification-challenge) and reached the 113-th place out of 3200+ teams. This repository contains my original code that is in the format of Jupitar Notebook (.ipynb) as well as a cleaned up version.
