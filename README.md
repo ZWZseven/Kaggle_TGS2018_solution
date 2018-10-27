@@ -1,7 +1,7 @@
-## Segmenting salt deposits from seismic images with deeply-supervised Unet (PyTorch)
+# Segmenting salt deposits from seismic images with deeply-supervised Unet (PyTorch)
 
 ## General
-I have participated in the Kaggle competition [TGS Salt Identification Challenge](https://www.kaggle.com/c/tgs-salt-identification-challenge) and reached the 113-th place out of 3200+ teams. This repository contains my original code that is in the format of Jupitar Notebook (.ipynb) as well as a cleaned up version.
+I have participated in the Kaggle competition [TGS Salt Identification Challenge](https://www.kaggle.com/c/tgs-salt-identification-challenge) and reached the 113-th place out of 3200+ teams. This repository contains the original code using the Jupitar Notebook format (.ipynb) as well as a cleaned up version(.py files).
 
 ## Data preprocessing
 The original images with size 101x101 px were padded to 128x128 px, then [integrated with position information](https://eng.uber.com/coordconv/) and finally stacked into 3-channel images. Random crop to the input size 128x128 px, horizonal flip, slight rotation and random linear brightness augmentation were applied.
