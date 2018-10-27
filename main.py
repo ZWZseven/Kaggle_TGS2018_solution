@@ -34,25 +34,30 @@ class ModelSolver(object):
         self.image_size = config.image_size
 
         # Hyper-parameteres
-        self.g_lr = config.lr
+        self.lr = config.lr
         #self.cycle_num = config.cycle_num
         #self.cycle_inter = config.cycle_inter
         self.epochs = config.epochs
 
-        self.batch_size = config.batch_size
+        self.BATCH_SIZE = config.batch_size
+        self.n_fold = config.n_fold
+        self.foldth = config.foldth
 
 
-    def data_prep(self, traincsv_path, depthscsv_path, train_image_path, train_mask_path):
+    def data_prep(self, traincsv_path, depthscsv_path, train_image_path, train_mask_path, n_fold=5, foldth=0):
+        n_fold = n_fold
+        foldth = foldth
+        
         train_df11 = pd.read_csv(traincsv_path, index_col="id", usecols=[0])
         depths_df11 = pd.read_csv(depthscsv_path, index_col="id")
-        #train_df
         train_df11 = train_df11.join(depths_df11)
         test_df11 = depths_df11[~depths_df11.index.isin(train_df11.index)]
 
         df_pred = pd.read_csv(traincsv_path, index_col=[0])
         df_pred.fillna('', inplace=True)
+        
+        #label suspicious masks        
         df_pred['suspicious'] = False
-
         i=0
         for index, row in df_pred.iterrows():
             encoded_mask = row['rle_mask'].split(' ')
@@ -61,53 +66,43 @@ class ModelSolver(object):
             if (len(encoded_mask) > 1 and len(encoded_mask) < 5 and int(encoded_mask[1]) % 101 == 0 and int(encoded_mask[1]) <= 100*101):
                 df_pred.loc[index,'suspicious'] = True
 
-        img_size_ori = 101
-        img_size_target = 128#127
-
         train_df0 = pd.read_csv(traincsv_path, index_col="id", usecols=[0])
         depths_df0 = pd.read_csv(depthscsv_path, index_col="id")
-        #train_df
+        
         train_df0 = train_df0.join(depths_df0)
         test_df0 = depths_df0[~depths_df0.index.isin(train_df0.index)]
         train_df0["images"] = [np.array(cv2.imread(train_image_path+"/{}.png".format(idx), 0)) / 255 for idx in (train_df0.index)]
-        #print(train_df.shape) if ~df_pred.loc[idx,'suspicious']
         train_df0['suspicious'] = df_pred['suspicious']
         train_df0['rle_mask'] = df_pred['rle_mask']
         train_df0["masks"] = [np.array(cv2.imread(train_mask_path+"/{}.png".format(idx), 0)) / 255 for idx in (train_df0.index)]
-
         train_df0["coverage"] = train_df0.masks.map(np.sum) / pow(img_size_ori, 2)
-
         train_df0["coverage_class"] = train_df0.coverage.map(cov_to_class)
-        ##############################################################################
+        
         train_df1=train_df0.copy()
         sus_df = train_df0[train_df0.suspicious]  
-
-        ##################################################################
-        n_fold = 5
+     
         depths = pd.read_csv(depthscsv_path)
         depths.sort_values('z', inplace=True)
-        #depths.drop('z', axis=1, inplace=True)
         depths['fold'] = (list(range(n_fold))*depths.shape[0])[:depths.shape[0]]
 
-        print(depths.head())
+        #print(depths.head())
 
-        train_df = depths[depths.fold!=0]
+        train_df = depths[depths.fold!=foldth]
         train_df = train_df[train_df.id.isin(train_df0.index)]
         train_df= train_df.join(df_pred,on='id')
-
-        valid_df = depths[depths.fold==0]
+        valid_df = depths[depths.fold==foldth]
         valid_df = valid_df[valid_df.id.isin(train_df0.index)]
         valid_df= valid_df.join(df_pred,on='id')
 
         train_df0.reset_index(inplace=True)
 
         grp = list(train_df.groupby('id'))
-
         zmin=min([list(m['z'].values) for _,m in grp])
         zmax=max([list(m['z'].values) for _,m in grp])
         zdif=(zmax[0]-zmin[0])
-        print(zdif)
-        print(zmin)
+        #print(zdif)
+        #print(zmin)
+        
         return train_df, valid_df, train_df1, train_df11, test_df0, test_df11, grp, zmin, zmax
 
     def load_weights(self, model, model_path):
@@ -117,12 +112,15 @@ class ModelSolver(object):
 
         return model
 
-    def model_train(self, train_df, valid_df, BATCH_SIZE=32, lr=1e-2, n_epochs=60, model_path=None):
+    def model_train(self):
+        
+        model_path = self.model_path
+        train_df, valid_df, train_df1, train_df11, test_df0, test_df11, grp, zmin, zmax = self.data_prep(traincsv_path=self.traincsv_path, depthscsv_path=self.depthscsv_path, train_image_path=self.train_image_path, train_mask_path=self.train_mask_path, n_fold==self.n_fold, foldth=self.foldth)
+        
+        
+        train_loader = make_loader(train_df, batch_size =  self.BATCH_SIZE, shuffle=True, transform=train_transform)
+        valid_loader = make_loader(valid_df, batch_size = self.BATCH_SIZE // 2, transform=None)
 
-        train_loader = make_loader(train_df, batch_size =  BATCH_SIZE, shuffle=True, transform=train_transform)
-        valid_loader = make_loader(valid_df, batch_size = BATCH_SIZE // 2, transform=None)
-
-        ########################################################
         train_transform = DualCompose([
                 HorizontalFlip(),
                 ZoominRandomCropNew([101,101],1.10),
@@ -131,19 +129,18 @@ class ModelSolver(object):
         ])
 
         val_transform = DualCompose([
-                #Imgexpand(),##############################################CenterCrop((512,512,3)),
+                #Imgexpand(),#CenterCrop((512,512,3)),
               ])
 
-
-        ######################################################
+        ######build model##########################################
         model = LinkNet34deeps(1) #
 
         if not model_path:
             if torch.cuda.is_available():
                 model.cuda()        
-            train5(init_optimizer=lambda lr: torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=0.0001),#(model.parameters(), lr=lr),
-                    lr = lr,#1e-4
-                    n_epochs = n_epochs,#35,#40,
+            train5(init_optimizer=lambda lr: torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=self.lr, momentum=0.9, weight_decay=0.0001),#(model.parameters(), lr=lr),
+                    lr = self.lr,#1e-4
+                    n_epochs = self.epochs,#35,
                     model=model,
                     criterion=criterionL5,#LossBinaryElu(jaccard_weight=0),
                     train_loader=train_loader,
@@ -154,9 +151,9 @@ class ModelSolver(object):
             model = load_weights(model, model_path)
             if torch.cuda.is_available():
                 model.cuda()
-            retrain5(init_optimizer=lambda lr: torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=0.0001),#(model.parameters(), lr=lr),
-            lr = lr,#1e-4
-            n_epochs = n_epochs,#35,#40,
+            retrain5(init_optimizer=lambda lr: torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=self.lr, momentum=0.9, weight_decay=0.0001),#(model.parameters(), lr=lr),
+            lr = self.lr,#1e-4
+            n_epochs = self.n_epochs,#35,#40,
             model=model,
             criterion=criterionL5,#LossBinaryElu(jaccard_weight=0),
             train_loader=train_loader,
@@ -179,19 +176,10 @@ class ModelSolver(object):
         plt.tight_layout()
         plt.show();
 
-    def determine_thrsh(self, valid_df, train_df1, model_path ='model_1.pt', batchsize=16):
-        model = LinkNet34deeps(1)
+    def determine_thrsh(self, valid_df, train_df1, model, batchsize=16):
 
         if ('id' in train_df1.columns.values.tolist()):
             train_df1=train_df1.set_index('id')
-
-        state = torch.load(str(model_path))
-        state = {key.replace('module.', ''): value for key, value in state['model'].items()}
-        model.load_state_dict(state)
-        if torch.cuda.is_available():
-            model.cuda()
-
-        model.eval()
 
         loader = DataLoader(
                 dataset=SaltDataset(valid_df, transform=None, mode='valid'),
@@ -206,18 +194,16 @@ class ModelSolver(object):
         out_pred_rows = []#pd.DataFrame(columns=('id', 'mask'))#[]
         for batch_num, (inputs, paths) in enumerate(tqdm(loader, desc='valid')):
             inputs = variable(inputs, volatile=True)
-            outputs = dummy_prediction2(inputs,model)
+            outputs = dummy_prediction2(inputs, model)
 
             for i, image_name in enumerate(paths):
                 mask = outputs[i,0]#F.sigmoid(outputs[i,0]).data.cpu().numpy()
                 out_pred_rows.extend([restore(mask).tolist()])# += [{'id': image_name, 'mask': mask}]
                 y_valid_ori.extend([train_df1.loc[image_name].masks])
 
-
         y_valid_ori = np.array(y_valid_ori)
         preds_valid = np.array(out_pred_rows)
 
-        #######################################################
         thresholds = np.linspace(0, 1, 50)
         ious = np.array([get_iou_vector(y_valid_ori, np.int32(preds_valid > threshold)) for threshold in tqdm_notebook(thresholds)])
 
@@ -233,10 +219,22 @@ class ModelSolver(object):
         plt.legend()
         return threshold_best
 
+    def model_predict(self, model_path)
+    
+        model = LinkNet34deeps(1)
+        
+        state = torch.load(str(model_path))
+        state = {key.replace('module.', ''): value for key, value in state['model'].items()}
+        model.load_state_dict(state)
+        if torch.cuda.is_available():
+            model.cuda()
 
-    ##test dataset########################################################
-    def model_predict(self, test_image_dir, test_df0, test_df11, threshold_best)
-        test_paths = os.listdir(test_image_dir+'/images/')
+        model.eval()
+
+        train_df, valid_df, train_df1, train_df11, test_df0, test_df11, grp, zmin, zmax = self.data_prep(traincsv_path=self.traincsv_path, depthscsv_path=self.depthscsv_path, train_image_path=self.train_image_path, train_mask_path=self.train_mask_path, n_fold==self.n_fold, foldth=self.foldth)
+        threshold_best = self.determine_thrsh(valid_df, train_df1, model, batchsize=16)    
+    
+        test_paths = os.listdir(self.test_image_dir+'/images/')
         print(len(test_paths), 'test images found')
 
         test_df0['rle_mask'] = None
@@ -249,12 +247,10 @@ class ModelSolver(object):
         if not('id' in test_df0.columns.values.tolist()):
             test_df0.reset_index(inplace=True)
 
-        #from skimage.morphology import binary_opening, disk
-        #
         loader = DataLoader(
                 dataset=SaltDataset(test_df0, transform=None, mode='predict'),
                 shuffle=False,
-                batch_size=16,#BATCH_SIZE,
+                batch_size=self.BATCH_SIZE //2,
                 num_workers=0,
                 pin_memory=torch.cuda.is_available()
             ) 
@@ -296,31 +292,30 @@ class ModelSolver(object):
         return sub
 #######################################################################################################################################
 
-def main(config, aug_list):
+def main(config):
     if config.mode == 'train':
         solver = ModelSolver(config)
-        solver.train_fold(config.train_fold_index, aug_list)
+        solver.train()
     if config.mode == 'test':
         solver = ModelSolver(config)
-        solver.infer_fold_all_Cycle(config.train_fold_index)
+        solver.prediction(solver.model_path)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-
-    parser.add_argument('--train_fold_index', type=int, default=0)
-    parser.add_argument('--image_size', type=int, default=128)
-    parser.add_argument('--batch_size', type=int, default=16)
-
-    aug_list = ['flip_lr']
+    
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'])
+    parser.add_argument('--n_fold', type=int, default=5)
+    parser.add_argument('--foldth', type=int, default=0)
+    parser.add_argument('--image_size', type=int, default=101)
+    parser.add_argument('--max_size', type=int, default=128)
+   
     parser.add_argument('--pretrained_model', type=str, default='model_1.pt')
-
     parser.add_argument('--lr', type=float, default=0.01)
-
-    parser.add_argument('--epochs', type=int, default=10)
-
-    # Test settings
+    parser.add_argument('--epochs', type=int, default=60)
+    parser.add_argument('--batch_size', type=int, default=16)
+    
+    # Data paths
     parser.add_argument('--traincsv_path', type=str, default='train.csv')
     parser.add_argument('--depthscsv_path', type=str, default='depths.csv')
     parser.add_argument('--train_image_path', type=str, default='train/images')
@@ -329,4 +324,4 @@ if __name__ == '__main__':
 
     config = parser.parse_args()
     print(config)
-    main(config, aug_list)
+    main(config)
