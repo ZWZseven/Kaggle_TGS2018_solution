@@ -1,6 +1,6 @@
 import os
-import numpy as np # linear algebra
-import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import numpy as np # 
+import pandas as pd # 
 from skimage.io import imread
 import matplotlib.pyplot as plt
 from skimage.segmentation import mark_boundaries
@@ -45,7 +45,7 @@ def multi_rle_encode(img):
     labels = label(img)
     return [rle_encode(labels==k) for k in np.unique(labels[labels>0])]
 
-def rle_decode(mask_rle, shape=(101, 101)):#############################rle_decode(mask_rle, shape=(768, 768)):
+def rle_decode(mask_rle, shape=(101, 101)):
     '''
     mask_rle: run-length as string formated (start length)
     shape: (height,width) of array to return 
@@ -61,7 +61,6 @@ def rle_decode(mask_rle, shape=(101, 101)):#############################rle_deco
     return img.reshape(shape).T  # Needed to align to RLE direction
 def upsample(img,img_size):
     return cv2.resize(img.squeeze(), (img_size, img_size), interpolation=cv2.INTER_LINEAR)
-#cv2.resize(img, (img_size, img_size))#, mode='constant', preserve_range=True)
 
 def upsamplearray(arr,img_size):
     out=[upsample(x.squeeze(),img_size) for x in arr]
@@ -70,16 +69,17 @@ def upsamplearray(arr,img_size):
 def downsample(img,img_size):
     #img_size=101
     return cv2.resize(img.squeeze(), (img_size, img_size), interpolation=cv2.INTER_LINEAR)
-#resize(img, (img_size, img_size), mode='constant', preserve_range=True)
+
+img_size_ori = 101
+img_size_target = 128
 
 def downsamplearray(arr):
     out=[downsample(x.squeeze(),101) for x in arr]
     return np.array(out).reshape(-1,101,101,1)
 
 def restore(img):
-    #return downsample(img.squeeze()[11:203,11:203])
     img = downsample(img,128)
-    return img.squeeze()[13:114,13:114]#cv2.resize(img.squeeze(), (101, 101), interpolation=cv2.INTER_LINEAR)#img.squeeze()[13:114,13:114]#
+    return img.squeeze()[13:114,13:114]
 
 def flpadding(img,a,b):#13,14
     m,n=img.shape
@@ -95,9 +95,8 @@ def flpadding(img,a,b):#13,14
     return output
 
 def imgexpand0(img):
-    t_size=128#224
+    t_size=128
     return upsample(flpadding(img.squeeze(),13,14),t_size).reshape(t_size,t_size,1)
-    #return flpadding(img.squeeze(),13,14).reshape(t_size,t_size,1)
     
 def imgexarray0(arr):
     out=[imgexpand0(x) for x in arr]
@@ -125,8 +124,6 @@ def imgexpand033(img):
 
 
 def masks_as_image(in_mask_list):
-    # Take the individual ship masks and create a single mask array for all ships
-    #all_masks = np.zeros((768, 768), dtype = np.int16)###################################################
     all_masks = np.zeros((101, 101), dtype = np.int16)
     #if isinstance(in_mask_list, list):
     for mask in in_mask_list:
