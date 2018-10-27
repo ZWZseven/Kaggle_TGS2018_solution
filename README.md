@@ -7,7 +7,7 @@ I have participated in the Kaggle competition [TGS Salt Identification Challenge
 The original images with size 101x101 px were padded to 128x128 px, and then [integrated with position information](https://eng.uber.com/coordconv/) (transformed into 3-channel images). Random crop to the input size 128x128 px, horizontal flip, slight rotation and random linear brightness augmentation were applied.
 
 ## Model design
-I used a [U-Net](https://arxiv.org/abs/1505.04597) like architecture with a ResNet34 encoder and very simple Decoder blocks. A special deep supervision structure was added to speed up training and avoid overfitting (as shown in the figure below). ![General scheme](saltdeeps.png) As a whole, the model has a very slim structure with only 22,190,693 parameters. Due to the limited computing power, I did not try deeper encoders like SE-ResNeXt50, which would possibly further boost the performance.
+I used a [U-Net](https://arxiv.org/abs/1505.04597) like architecture with a ResNet34 encoder and very simple Decoder blocks. A special deep supervision structure was added to speed up training and avoid overfitting (as shown in the figure below). ![General scheme](saltdeeps.png) As a whole, the model has a very slim structure with only 22,190,693 parameters. But due to the limited computing power, I was not able to try deeper encoders like SE-ResNeXt50, which would possibly further boost the performance.
 
 ## Models Training
 Loss function: [Lovasz hinge loss](https://arxiv.org/abs/1705.08790).
