@@ -7,9 +7,9 @@ I have participated in the Kaggle competition [TGS Salt Identification Challenge
 The original images with size 101x101 px were padded to 128x128 px, and then [integrated with position information](https://eng.uber.com/coordconv/) (transformed into 3-channel images). Random crop to the input size 128x128 px, horizontal flip, slight rotation and random linear brightness augmentation were applied.
 
 ## Model design
-I used a [U-Net](https://arxiv.org/abs/1505.04597) like architecture with a ResNet34 encoder and very simple Decoder blocks. Partly based on  [Heng's discussion](https://www.kaggle.com/c/tgs-salt-identification-challenge/discussion/65933) on the Kaggle discussion board, a special deep supervision structure was added to speed up training and avoid overfitting (as shown in the figure below). ![General scheme](saltdeeps.png) As a whole, the model has a very slim structure with only 22,190,693 parameters. But due to the limited computing power available, I was not able to try deeper encoders like SE-ResNeXt50, which would possibly further boost the performance.
+I used a [U-Net](https://arxiv.org/abs/1505.04597) like architecture with a ResNet34 encoder and very simple decoder blocks. Partly based on  [Heng's discussion](https://www.kaggle.com/c/tgs-salt-identification-challenge/discussion/65933) on the Kaggle discussion board, a special deep supervision structure was added to speed up training and avoid overfitting (as shown in the figure below). ![General scheme](saltdeeps.png) As a whole, the model has a very slim structure with only 22,190,693 parameters. But due to the limited computing power available, I was not able to try deeper encoders like SE-ResNeXt50, which would possibly further boost the performance.
 
-## Models Training
+## Model training
 Loss function: [Lovasz hinge loss](https://arxiv.org/abs/1705.08790).
 
 Optimizer: SGD with LR 0.01, momentum 0.9, weight_decay 0.0001.
@@ -20,6 +20,6 @@ Train stages:
 2) 300 epoches, resized to 192x192;
 3) [Cosine annealing learning rate](https://openreview.net/forum?id=BJYwwY9ll) 200 epochs, 50 per cycle; max_lr = 0.01, min_lr = 0.001.
 
-## Cross-validation
-5-fold CV (stratified by depth). For each fold, flip + null test time augmentation was implemented. Averaged results of five folds were used as the final submission. 
+## Multiple-fold ensemble
+5-fold cross-validation (stratified by depth). For each fold, flip + null test time augmentation was implemented. The final results were the average of different folds. 
 
