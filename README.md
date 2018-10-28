@@ -21,5 +21,5 @@ Train stages:
 3) [Cosine annealing learning rate](https://openreview.net/forum?id=BJYwwY9ll) 200 epochs, 50 per cycle; max_lr = 0.01, min_lr = 0.001.
 
 ## Multiple-fold ensemble
-5-fold cross-validation (stratified by depth). For each fold, flip + null test time augmentation was implemented. The final results were the average of different folds. 
+5-fold cross-validation (stratified by depth). For each fold, flip + null test time augmentation was implemented. The final results were obtained by averaging the results of different folds. 
 
